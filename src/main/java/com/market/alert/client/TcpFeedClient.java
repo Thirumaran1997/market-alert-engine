@@ -5,25 +5,30 @@ import com.market.alert.model.MarketData;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
-import java.io.BufferedReader;
+import java.io.DataInputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.net.Socket;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Consumer;
 
 /**
- * TCP client for consuming market data feed
- * Assumes fixed format: field1|field2|field3|...
+ * TCP client for consuming market data feed in binary packet format
  */
 @Slf4j
 @Component
 public class TcpFeedClient {
     
+    private static final int PACKET_SIZE = 402; // Total packet size in bytes
+    
     private final TcpFeedProperties properties;
     private Socket socket;
-    private BufferedReader reader;
+    private DataInputStream inputStream;
     private volatile boolean running = false;
     private Thread readerThread;
     
@@ -85,100 +90,172 @@ public class TcpFeedClient {
         if (socket == null || socket.isClosed()) {
             log.info("Connecting to TCP feed at {}:{}", properties.getHost(), properties.getPort());
             socket = new Socket(properties.getHost(), properties.getPort());
-            reader = new BufferedReader(new InputStreamReader(socket.getInputStream()), properties.getBufferSize());
+            inputStream = new DataInputStream(socket.getInputStream());
             log.info("Connected to TCP feed");
         }
     }
     
     private void readData(Consumer<MarketData> dataConsumer) throws IOException {
-        String line;
-        while (running && (line = reader.readLine()) != null) {
+        byte[] packet = new byte[PACKET_SIZE];
+        
+        while (running) {
+            int totalRead = 0;
+            while (totalRead < PACKET_SIZE) {
+                int bytesRead = inputStream.read(packet, totalRead, PACKET_SIZE - totalRead);
+                if (bytesRead == -1) {
+                    throw new IOException("End of stream reached");
+                }
+                totalRead += bytesRead;
+            }
+            
             try {
-                MarketData data = parseMarketData(line);
+                MarketData data = parsePacket(packet);
                 if (data != null) {
                     dataConsumer.accept(data);
                 }
             } catch (Exception e) {
-                log.error("Error parsing market data: {}", line, e);
+                log.error("Error parsing market data packet", e);
             }
         }
     }
     
     /**
-     * Parse fixed format TCP data
-     * Expected format (pipe-separated):
-     * symbol|exchange|ltp|openPrice|closePrice|weekHigh52|weekLow52|daysChange|daysChangePercent|
-     * intradayChange|intradayChangePercent|volume|openInterest|oiDayChangePercent|oiDayHigh|oiDayLow|
-     * lastTradedQuantity|averageTradedPrice|totalBuyQuantity|totalSellQuantity
+     * Parse binary packet format
      */
-    private MarketData parseMarketData(String line) {
-        if (line == null || line.trim().isEmpty()) {
-            return null;
-        }
-        
-        String[] fields = line.split("\\|");
-        if (fields.length < 20) {
-            log.warn("Invalid data format, expected at least 20 fields, got {}", fields.length);
-            return null;
-        }
-        
+    private MarketData parsePacket(byte[] packet) {
         try {
+            ByteBuffer buffer = ByteBuffer.wrap(packet);
+            buffer.order(ByteOrder.LITTLE_ENDIAN);
+            
+            // Read symbol (50 bytes, UTF-8, space-padded)
+            byte[] symbolBytes = new byte[50];
+            buffer.get(symbolBytes);
+            String symbol = new String(symbolBytes, java.nio.charset.StandardCharsets.UTF_8).trim();
+            
+            // Read sequence number (8 bytes)
+            long sequenceNumber = buffer.getLong();
+            
+            // Read timestamps (8 bytes each)
+            long udpReceptionTimestamp = buffer.getLong();
+            long publisherTimestamp = buffer.getLong();
+            
+            log.debug("Processing packet: symbol={}, seq={}, udpTs={}, pubTs={}",
+                     symbol, sequenceNumber, udpReceptionTimestamp, publisherTimestamp);
+            
+            // Read price fields (88 bytes = 11 doubles)
+            double ltp = buffer.getDouble();
+            double volume = buffer.getDouble();
+            double oi = buffer.getDouble();
+            double open = buffer.getDouble();
+            double high = buffer.getDouble();
+            double low = buffer.getDouble();
+            double close = buffer.getDouble();
+            double pdc = buffer.getDouble();
+            double upperCircuit = buffer.getDouble();
+            double lowerCircuit = buffer.getDouble();
+            double lastTradedQty = buffer.getDouble();
+            
+            // Skip last traded time (20 bytes)
+            buffer.position(buffer.position() + 20);
+            
+            // Skip expiry (12 bytes)
+            buffer.position(buffer.position() + 12);
+            
+            // Read buy depth (5 levels, 24 bytes each: price 8, qty 8, orders 8)
+            List<MarketData.DepthLevel> bids = new ArrayList<>();
+            for (int i = 0; i < 5; i++) {
+                double price = buffer.getDouble();
+                double quantity = buffer.getDouble();
+                double ordersDouble = buffer.getDouble();
+                int orders = (int) ordersDouble;
+                
+                // Filter out zero/invalid prices (these are just fillers)
+                if (price > 0) {
+                    bids.add(new MarketData.DepthLevel(price, (int) quantity, orders));
+                }
+            }
+            
+            // Read sell depth (5 levels, 24 bytes each: price 8, qty 8, orders 8)
+            List<MarketData.DepthLevel> asks = new ArrayList<>();
+            for (int i = 0; i < 5; i++) {
+                double price = buffer.getDouble();
+                double quantity = buffer.getDouble();
+                double ordersDouble = buffer.getDouble();
+                int orders = (int) ordersDouble;
+                
+                // Filter out zero/invalid prices (these are just fillers)
+                if (price > 0) {
+                    asks.add(new MarketData.DepthLevel(price, (int) quantity, orders));
+                }
+            }
+            
+            // Calculate derived fields
+            BigDecimal ltpBd = toBigDecimal(ltp);
+            BigDecimal pdcBd = toBigDecimal(pdc);
+            BigDecimal daysChange = null;
+            BigDecimal daysChangePercent = null;
+            
+            if (ltpBd != null && pdcBd != null && pdcBd.compareTo(BigDecimal.ZERO) != 0) {
+                daysChange = ltpBd.subtract(pdcBd);
+                daysChangePercent = daysChange.divide(pdcBd, 4, RoundingMode.HALF_UP)
+                        .multiply(BigDecimal.valueOf(100));
+            }
+            
+            // Calculate total buy and sell quantities from depth
+            long totalBuyQty = bids.stream().mapToLong(MarketData.DepthLevel::getQuantity).sum();
+            long totalSellQty = asks.stream().mapToLong(MarketData.DepthLevel::getQuantity).sum();
+            
             return MarketData.builder()
                     .timestamp(LocalDateTime.now())
-                    .symbol(parseString(fields[0]))
-                    .exchange(parseString(fields[1]))
-                    .ltp(parseBigDecimal(fields[2]))
-                    .openPrice(parseBigDecimal(fields[3]))
-                    .closePrice(parseBigDecimal(fields[4]))
-                    .weekHigh52(parseBigDecimal(fields[5]))
-                    .weekLow52(parseBigDecimal(fields[6]))
-                    .daysChange(parseBigDecimal(fields[7]))
-                    .daysChangePercent(parseBigDecimal(fields[8]))
-                    .intradayChange(parseBigDecimal(fields[9]))
-                    .intradayChangePercent(parseBigDecimal(fields[10]))
-                    .volume(parseLong(fields[11]))
-                    .openInterest(parseLong(fields[12]))
-                    .oiDayChangePercent(parseBigDecimal(fields[13]))
-                    .oiDayHigh(parseLong(fields[14]))
-                    .oiDayLow(parseLong(fields[15]))
-                    .lastTradedQuantity(parseLong(fields[16]))
-                    .averageTradedPrice(parseBigDecimal(fields[17]))
-                    .totalBuyQuantity(parseLong(fields[18]))
-                    .totalSellQuantity(parseLong(fields[19]))
+                    .symbol(symbol)
+                    .sequenceNumber(sequenceNumber)
+                    .udpReceptionTimestamp(udpReceptionTimestamp)
+                    .publisherTimestamp(publisherTimestamp)
+                    .ltp(ltpBd)
+                    .volume(toLong(volume))
+                    .openInterest(toLong(oi))
+                    .openPrice(toBigDecimal(open))
+                    .highPrice(toBigDecimal(high))
+                    .lowPrice(toBigDecimal(low))
+                    .closePrice(toBigDecimal(close))
+                    .previousDayClose(pdcBd)
+                    .upperCircuit(toBigDecimal(upperCircuit))
+                    .lowerCircuit(toBigDecimal(lowerCircuit))
+                    .lastTradedQuantity(toLong(lastTradedQty))
+                    .daysChange(daysChange)
+                    .daysChangePercent(daysChangePercent)
+                    .totalBuyQuantity(totalBuyQty)
+                    .totalSellQuantity(totalSellQty)
+                    .bids(bids)
+                    .asks(asks)
                     .build();
         } catch (Exception e) {
-            log.error("Error building market data object", e);
+            log.error("Error parsing packet", e);
             return null;
         }
     }
     
-    private String parseString(String value) {
-        return value != null && !value.trim().isEmpty() ? value.trim() : null;
-    }
-    
-    private BigDecimal parseBigDecimal(String value) {
-        try {
-            return value != null && !value.trim().isEmpty() ? new BigDecimal(value.trim()) : null;
-        } catch (NumberFormatException e) {
+    private BigDecimal toBigDecimal(double value) {
+        if (value == 0.0 || Double.isNaN(value) || Double.isInfinite(value)) {
             return null;
         }
+        return BigDecimal.valueOf(value);
     }
     
-    private Long parseLong(String value) {
-        try {
-            return value != null && !value.trim().isEmpty() ? Long.parseLong(value.trim()) : null;
-        } catch (NumberFormatException e) {
+    private Long toLong(double value) {
+        if (value == 0.0 || Double.isNaN(value) || Double.isInfinite(value)) {
             return null;
         }
+        return (long) value;
     }
     
     private void closeConnection() {
         try {
-            if (reader != null) {
-                reader.close();
+            if (inputStream != null) {
+                inputStream.close();
             }
         } catch (IOException e) {
-            log.error("Error closing reader", e);
+            log.error("Error closing input stream", e);
         }
         
         try {

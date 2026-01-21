@@ -65,16 +65,41 @@ market:
 
 ## TCP Feed Data Format
 
-The application expects TCP feed data in pipe-separated format:
+The application expects TCP feed data in **binary packet format** (402 bytes per packet):
 
-```
-symbol|exchange|ltp|openPrice|closePrice|weekHigh52|weekLow52|daysChange|daysChangePercent|intradayChange|intradayChangePercent|volume|openInterest|oiDayChangePercent|oiDayHigh|oiDayLow|lastTradedQuantity|averageTradedPrice|totalBuyQuantity|totalSellQuantity
-```
+### Packet Structure (Little Endian)
 
-Example:
-```
-AAPL|NYSE|150.25|148.50|149.75|180.00|120.00|0.50|0.33|1.75|1.18|5000000|100000|2.5|105000|98000|1000|149.85|2500000|2500000
-```
+| Offset | Size | Field | Type | Description |
+|--------|------|-------|------|-------------|
+| 0 | 50 | Symbol | UTF-8 String | Space-padded symbol name |
+| 50 | 8 | Sequence Number | Long | Packet sequence number |
+| 58 | 8 | UDP Reception Timestamp | Long | UDP reception timestamp |
+| 66 | 8 | Publisher Timestamp | Long | Publisher timestamp |
+| 74 | 8 | LTP | Double | Last Traded Price |
+| 82 | 8 | Volume | Double | Trading volume |
+| 90 | 8 | OI | Double | Open Interest |
+| 98 | 8 | Open | Double | Opening price |
+| 106 | 8 | High | Double | Day's high |
+| 114 | 8 | Low | Double | Day's low |
+| 122 | 8 | Close | Double | Closing price |
+| 130 | 8 | PDC | Double | Previous day close |
+| 138 | 8 | Upper Circuit | Double | Upper circuit limit |
+| 146 | 8 | Lower Circuit | Double | Lower circuit limit |
+| 154 | 8 | Last Traded Qty | Double | Last traded quantity |
+| 162 | 20 | Last Traded Time | - | (Skipped) |
+| 182 | 12 | Expiry | - | (Skipped) |
+| 194 | 120 | Buy Depth | 5 Levels | 5 bid levels (24 bytes each) |
+| 314 | 120 | Sell Depth | 5 Levels | 5 ask levels (24 bytes each) |
+
+### Depth Level Structure (24 bytes)
+- **Price** (8 bytes, Double): Price level
+- **Quantity** (8 bytes, Double): Quantity at this level
+- **Orders** (8 bytes, Double): Number of orders
+
+Note: Zero/invalid prices in depth levels are filtered out as they are just fillers.
+
+### Example Usage
+The TCP client automatically reads 402-byte packets, parses them using ByteBuffer with Little Endian byte order, and converts them into MarketData objects for criteria evaluation.
 
 ## Building the Application
 

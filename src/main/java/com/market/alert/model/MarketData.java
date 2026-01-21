@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * Market data model containing all fields for alert criteria evaluation
@@ -19,34 +20,53 @@ public class MarketData {
     
     // Instrument identification
     private String symbol;
-    private String exchange;
     
-    // Timestamp
+    // Sequence and timestamps
+    private Long sequenceNumber;
+    private Long udpReceptionTimestamp;
+    private Long publisherTimestamp;
     private LocalDateTime timestamp;
     
-    // Price fields
+    // Price fields from packet
     private BigDecimal ltp; // Last Traded Price
+    private Long volume;
+    private Long openInterest;
     private BigDecimal openPrice;
+    private BigDecimal highPrice;
+    private BigDecimal lowPrice;
     private BigDecimal closePrice;
+    private BigDecimal previousDayClose;
+    private BigDecimal upperCircuit;
+    private BigDecimal lowerCircuit;
+    private Long lastTradedQuantity;
+    
+    // Calculated fields for alert criteria
     private BigDecimal weekHigh52;
     private BigDecimal weekLow52;
-    
-    // Change metrics
     private BigDecimal daysChange;
     private BigDecimal daysChangePercent;
     private BigDecimal intradayChange;
     private BigDecimal intradayChangePercent;
-    
-    // Volume and OI (Open Interest)
-    private Long volume;
-    private Long openInterest;
     private BigDecimal oiDayChangePercent;
     private Long oiDayHigh;
     private Long oiDayLow;
-    
-    // Trading quantities
-    private Long lastTradedQuantity;
     private BigDecimal averageTradedPrice;
     private Long totalBuyQuantity;
     private Long totalSellQuantity;
+    
+    // Market depth
+    private List<DepthLevel> bids;
+    private List<DepthLevel> asks;
+    
+    /**
+     * Depth level for bid/ask
+     */
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class DepthLevel {
+        private double price;
+        private int quantity;
+        private int orders;
+    }
 }
