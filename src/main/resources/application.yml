@@ -1,0 +1,46 @@
+spring:
+  application:
+    name: market-alert-engine
+
+# TCP Feed Configuration
+market:
+  feed:
+    tcp:
+      host: localhost
+      port: 5000
+      reconnect-delay-seconds: 5
+      buffer-size: 8192
+      auto-reconnect: true
+
+  # Alert Configuration
+  alert:
+    default-alert-api-url: http://localhost:8081/api/alerts
+    criteria:
+      # Example criteria configuration
+      # Uncomment and configure as needed
+#      - criteria-id: "high-volume-alert"
+#        symbol: "AAPL"
+#        volume-min-threshold: 1000000
+#        alert-api-url: "http://localhost:8081/api/alerts/volume"
+#
+#      - criteria-id: "price-spike-alert"
+#        symbol: "GOOGL"
+#        days-change-percent-min-threshold: 5.0
+#        alert-api-url: "http://localhost:8081/api/alerts/price-spike"
+#
+#      - criteria-id: "52-week-high-alert"
+#        ltp-min-threshold: 100
+#        week-high-52-threshold: 150
+#        alert-api-url: "http://localhost:8081/api/alerts/52-week-high"
+
+# Server Configuration
+server:
+  port: 8080
+
+# Logging Configuration
+logging:
+  level:
+    com.market.alert: INFO
+    root: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"

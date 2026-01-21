@@ -1,0 +1,35 @@
+# Exclude build artifacts and dependencies
+target/
+*.jar
+*.war
+*.ear
+*.class
+
+# Maven
+.mvn/
+mvn
+mvnw
+mvnw.cmd
+
+# IDE files
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+/tmp/
+*.tmp
+*.bak
+*.swp
+*~
