@@ -26,7 +26,7 @@ public class AlertApiService {
     /**
      * Invoke alert API asynchronously
      */
-    @Async
+    @Async("alertApiExecutor")
     public void invokeAlert(String apiUrl, AlertEvent alertEvent) {
         log.info("Invoking alert API: {} for criteria: {}, symbol: {}", 
                 apiUrl, alertEvent.getCriteriaId(), alertEvent.getSymbol());
