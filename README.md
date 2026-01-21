@@ -65,16 +65,16 @@ market:
 
 ## TCP Feed Data Format
 
-The application expects TCP feed data in **binary packet format** (402 bytes per packet):
+The application expects TCP feed data in **binary packet format** (512 bytes per packet):
 
-### Packet Structure (Little Endian)
+### Packet Structure (Little Endian, Total 512 bytes)
 
 | Offset | Size | Field | Type | Description |
 |--------|------|-------|------|-------------|
 | 0 | 50 | Symbol | UTF-8 String | Space-padded symbol name |
 | 50 | 8 | Sequence Number | Long | Packet sequence number |
-| 58 | 8 | UDP Reception Timestamp | Long | UDP reception timestamp |
-| 66 | 8 | Publisher Timestamp | Long | Publisher timestamp |
+| 58 | 8 | UDP Reception Timestamp | Long | UDP reception timestamp (epoch millis) |
+| 66 | 8 | Publisher Timestamp | Long | Publisher timestamp (epoch millis) |
 | 74 | 8 | LTP | Double | Last Traded Price |
 | 82 | 8 | Volume | Double | Trading volume |
 | 90 | 8 | OI | Double | Open Interest |
@@ -86,20 +86,23 @@ The application expects TCP feed data in **binary packet format** (402 bytes per
 | 138 | 8 | Upper Circuit | Double | Upper circuit limit |
 | 146 | 8 | Lower Circuit | Double | Lower circuit limit |
 | 154 | 8 | Last Traded Qty | Double | Last traded quantity |
-| 162 | 20 | Last Traded Time | - | (Skipped) |
-| 182 | 12 | Expiry | - | (Skipped) |
+| 162 | 20 | Last Traded Time | UTF-8 String | Space-padded timestamp |
+| 182 | 12 | Expiry | UTF-8 String | Space-padded expiry |
 | 194 | 120 | Buy Depth | 5 Levels | 5 bid levels (24 bytes each) |
 | 314 | 120 | Sell Depth | 5 Levels | 5 ask levels (24 bytes each) |
+| 434 | 78 | Reserved | - | Reserved for future fields (zeros) |
+
+**Total**: 50+8+8+8+88+20+12+120+120+78 = **512 bytes**
 
 ### Depth Level Structure (24 bytes)
 - **Price** (8 bytes, Double): Price level
 - **Quantity** (8 bytes, Double): Quantity at this level
 - **Orders** (8 bytes, Double): Number of orders
 
-Note: Zero/invalid prices in depth levels are filtered out as they are just fillers.
+Note: Zero/invalid prices in depth levels (price=0 and qty=0) are filtered out as they are just fillers.
 
 ### Example Usage
-The TCP client automatically reads 402-byte packets, parses them using ByteBuffer with Little Endian byte order, and converts them into MarketData objects for criteria evaluation.
+The TCP client automatically reads 512-byte fixed-size packets, parses them using ByteBuffer with Little Endian byte order, and converts them into MarketData objects for criteria evaluation.
 
 ## Building the Application
 

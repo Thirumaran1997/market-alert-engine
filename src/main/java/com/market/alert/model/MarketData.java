@@ -40,6 +40,10 @@ public class MarketData {
     private BigDecimal lowerCircuit;
     private Long lastTradedQuantity;
     
+    // Time and expiry fields
+    private String lastTradedTime;
+    private String expiry;
+    
     // Calculated fields for alert criteria
     private BigDecimal weekHigh52;
     private BigDecimal weekLow52;
